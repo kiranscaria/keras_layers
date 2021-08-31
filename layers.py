@@ -1111,8 +1111,12 @@ class AddCoords2D(Layer):
         x = AddCoords2D()(x)
         x = Conv2D(32, 3, padding='same', activation='relu')(x)
     
+    # Notes
+        Semi-convolutional Operators is an approach that is closely related to CoordConv.
+    
     # References
         [An Intriguing Failing of Convolutional Neural Networks and the CoordConv Solution](http://arxiv.org/abs/1807.03247)
+        [Semi-convolutional Operators for Instance Segmentation](https://arxiv.org/abs/1807.10712)
     """
     def __init__(self, with_r=False, **kwargs):
         super(AddCoords2D, self).__init__(**kwargs)
@@ -1168,8 +1172,8 @@ class LayerNormalization(Layer):
         super(LayerNormalization, self).build(input_shape)
     
     def call(self, x):
-        mean = K.mean(x, axis=-1, keepdims=True)
-        std = K.std(x, axis=-1, keepdims=True)
+        mean = tf.stop_gradient(K.mean(x, axis=-1, keepdims=True))
+        std = tf.stop_gradient(K.std(x, axis=-1, keepdims=True))
         return self.gamma * (x - mean) / (std + self.eps) + self.beta
     
     def compute_output_shape(self, input_shape):
@@ -1177,6 +1181,40 @@ class LayerNormalization(Layer):
 
     def get_config(self):
         config = super(LayerNormalization, self).get_config()
+        config.update({
+            'eps': self.eps,
+        })
+        return config
+
+
+class InstanceNormalization(Layer):
+    """Instance Normalization Layer.
+    
+    # References
+        [Instance Normalization: The Missing Ingredient for Fast Stylization](https://arxiv.org/abs/1607.08022)
+    """
+    def __init__(self, eps=1e-6, **kwargs):
+        super(InstanceNormalization, self).__init__(**kwargs)
+        self.eps = eps
+    
+    def build(self, input_shape):
+        self.gamma = self.add_weight(name='gamma', shape=input_shape[-1:],
+                                     initializer=initializers.Ones(), trainable=True)
+        self.beta = self.add_weight(name='beta', shape=input_shape[-1:],
+                                    initializer=initializers.Zeros(), trainable=True)
+        super(InstanceNormalization, self).build(input_shape)
+    
+    def call(self, x):
+        axis = list(range(len(x.shape))[1:-1])
+        mean = tf.stop_gradient(K.mean(x, axis=axis, keepdims=True))
+        std = tf.stop_gradient(K.std(x, axis=axis, keepdims=True))
+        return self.gamma * (x - mean) / (std + self.eps) + self.beta
+    
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
+    def get_config(self):
+        config = super(InstanceNormalization, self).get_config()
         config.update({
             'eps': self.eps,
         })
@@ -1271,7 +1309,7 @@ class Blur2D(Layer):
 
 
 class Scale(Layer):
-    """Layer to learn a linear feature scaling.
+    """Layer to learn a affine feature scaling.
     """
     def __init__(self,
                  use_shift=True,
